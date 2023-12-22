@@ -1,0 +1,660 @@
+---
+title: "Evaluating the Effect of Racial Minority on Minority Graduation"
+author: 'Lab 2 - Team: Galactic Mavericks'
+output:
+  pdf_document: default
+  html_document: default
+---
+```{r message=FALSE, warning=FALSE, include=FALSE}
+
+
+library(tidyverse)
+library(sandwich)
+library(lmtest)
+library(stargazer)
+library(magrittr)
+library(grid)
+library(gridExtra)
+
+```
+
+```{r , warning=FALSE, include=FALSE}
+
+data <- read.csv("cc_state_sector_grads-lab_2_dataset.csv")
+
+data_grouped <- read.csv("cc_state_sector_grads-lab_2_dataset.csv")
+party <- read.csv("states.csv")
+
+details <- read.csv("cc_state_sector_details.csv")
+
+inst_details <- read.csv("cc_institution_details.csv")
+```
+
+
+## Introduction:
+
+In recent decades, collegiate education has experienced a significant surge in enrollment, with undergraduate enrollment numbers increasing by almost 30% in the past two decades (1). As educational opportunities have expanded and become more accessible to the general public, it is crucial to examine the factors that contribute to student success, particularly among those from underrepresented minority groups. The composition of the student body has emerged as a crucial factor affecting student outcomes. As colleges and universities have become more racially diverse, scholars have begun to investigate the impact of this diversity on student achievement.
+
+Therefore, our study will focus on the academic performance of ethnic minority students within a diverse student body, with the ultimate goal of providing insight into the factors that contribute to their academic success. By examining this relationship, our analysis aims to provide practical implications for educational institutions and policymakers seeking to improve the educational outcomes of underrepresented minority students. 
+Specifically, the research question that we will strive to answer is, Does having a higher percentage of racial minority composition within a student body lead to higher graduation rates for minorities?
+
+## Data and Methodology:
+
+The data used in this research is being derived from the National Center for Education Statistics’, Integrated Postsecondary Education System (IPEDS) and the Voluntary System of Accountability’s Student Success and Progress rate. The data was compiled and uploaded to kaggle by Jonathan Ortiz (2). 
+In our analysis, we included data on five racial categories: black, Asian, Hispanic, American Indian, and white. It is important to note that we considered the first four racial groups to be minority groups according to the US Census Bureau. This designation is based on the bureau's classification system, which defines a minority group as any group that is not non-Hispanic white alone.
+
+## Data Manipulation: 
+
+Our dataset consisted of one main table, state_sector_grad, which contains the graduation rates by state, institution type and race, and 2 secondary tables, state_sector_details and institution_details that had information about state appropriations and student aid respectively. In order to successfully prep the data for our analysis, we had to perform the following data transformations within R. We initially performed all exploration and analysis work on a 30% subsample of the data. We then used the remaining 70% as the confirmation set to generate the statistics in this report.
+
+The first step taken was to calculate the graduation rate of each minority group. We first filtered the data to show only data from the total race to get the total student body count (“total_cohort”) grouped by the following fields: state, control, level, year,and cohort. This data frame was called data_totals. We then created a separate dataframe,“df”, that was grouped by the following fields:"state","control","level","year","cohort","gender" and we then dropped all columns that we deemed irrelevant for our analysis. We joined the initial dataset back to the totals dataframe based on the following fields: "state","control","level". In order to gather the endowment and aid information, we joined the institution_details and the  state_data to the main fact table on fields: "state","control","level". In regards to the metric calculations such as grad_150_rate, we decided to create our own graduation rate. The reason we did this is that this will make it easier to summarize the data when we are grouping. This was made possible by the total_cohort field from the totals df.
+
+In addition to the data transformations mentioned earlier, we then omitted the variables 'year' and ‘cohort’ from our analysis because the graduation rates remained constant throughout the years in the dataset and the cohort type (whether it’s a 4-year bachelor program or another 4-year program) didn’t have any noticeable effect. Omitting these variables allowed us to simplify our analysis and focus on other relevant variables.
+However, it is important to note that omitting a relevant variable can lead to omitted variable bias. In order to avoid this bias, we conducted a sensitivity analysis where we included the 'year' and ‘cohort’ variable in our analysis and assessed its impact on our findings. Our sensitivity analysis indicated that the inclusion of the variables did not significantly affect our results, as the variables were not associated with our outcome variable of interest, the graduation rate.
+
+Our team then omitted all values with the race “white” in order to target minorities within our analysis. We also dropped the state “United States” as it included the national averages. Our final dataset consisted of the following 5 base metrics: perc_minority (percent minority), grad_100_rate (those that graduate on time), grad_150_rate (those that graduate on time and late), aid_value (aid going to student recipients), and state_appr_value (State appropriations to higher education). For the purpose of our analysis we decided to focus on the variable grad_150_rate instead of the grad_100_rate as this more closely aligns with our research question.
+
+
+
+
+```{r, manipulate the data: getting the total cohort number for each cohort, warning=FALSE, include=FALSE}
+
+# data_grouped = data_grouped %>% group_by(state,state_abbr, control, level, year,cohort)  %>%
+#                     summarise(total_cohort = sum(grad_cohort),
+#                               .groups = 'drop')
+
+data_totals <- filter(data, race == "X")
+
+drop <- c("state_abbr","index","stateid","grad_cohort_ct","race","grad_100","grad_150","grad_100_rate","grad_150_rate")
+data_totals = data_totals[,!(names(data_totals) %in% drop)]
+
+data_totals = data_totals %>% rename(total_cohort = grad_cohort)
+```
+
+```{r, calculating the aid value and the endowment of each category, warning=FALSE, include=FALSE}
+
+inst_details = inst_details %>% group_by(state, control, level)  %>%
+                    summarise(aid_value = mean(aid_value),
+                              endow_value = mean(endow_value),
+                              .groups = 'drop')
+
+```
+
+
+
+```{r, manipulate the data (2): coming up with the racial composition of each cohort, warning=FALSE, include=FALSE}
+
+df <- merge(x=data,y=data_totals, 
+             by=c("state","control","level","year","cohort","gender"),
+             all.x=TRUE)
+
+
+
+drop2 <- c("state_abbr","index","stateid","grad_cohort_ct","grad_100_rate","grad_150_rate")
+df = df[,!(names(df) %in% drop2)]
+df2 <- df
+drop3 <- c("index","stateid","state_abbr","state_post")
+details = details[,!(names(details) %in% drop3)]
+
+
+df = df %>% group_by(state, control, level,race)  %>%
+                    summarise(grad_cohort = sum(grad_cohort),
+                              grad_100 = sum(grad_100),
+                              grad_150 = sum(grad_150),
+                              total_cohort = sum(total_cohort),
+                              .groups = 'drop')
+
+
+df2 = df2 %>% group_by(state, control, level,year, cohort, race)  %>%
+                    summarise(grad_cohort = sum(grad_cohort),
+                              grad_100 = sum(grad_100),
+                              grad_150 = sum(grad_150),
+                              total_cohort = sum(total_cohort),
+                              .groups = 'drop')
+
+df_wrace <- df
+
+
+
+df <- merge(x=df,y=details, 
+             by=c("state","control","level"),
+             all.x=TRUE)
+
+
+df <- df %>%
+  mutate(perc_minority = (grad_cohort/total_cohort)*100)
+
+df <- df %>%
+  mutate( grad_100_rate = (grad_100/grad_cohort)*100)
+
+df <- df %>%
+  mutate( grad_150_rate = (grad_150/grad_cohort)*100)
+
+df <- df %>% 
+          mutate(grad_100_rate = coalesce(grad_100_rate, 0))
+
+df <- df %>% 
+  mutate(exp_award_state_value_pp = exp_award_state_value/100)
+
+df <- df %>%
+  mutate( grad_cohort_norm = (grad_cohort/max(grad_cohort)))
+
+df <- df %>%
+  mutate( grad_150_norm = (grad_150/max(grad_150)))
+
+
+df <- filter(df, race != "X" & race != "W"  & state != "United States")
+#& level == "4-year" & control == "Public")
+
+
+
+df <- merge(x=df,y=party, 
+             by=c("state"),
+             all.x=TRUE)
+
+df <- merge(x=df,y=inst_details, 
+             by=c("state","control","level"),
+             all.x=TRUE)
+
+df <- filter(df, aid_value != 0)
+
+ df <- df %>%
+   mutate( aid_value_norm = (aid_value/max(aid_value)))
+
+ 
+df2 <- df2 %>%
+  mutate(perc_minority = (grad_cohort/total_cohort)*100)
+
+df2 <- df2 %>%
+  mutate( grad_100_rate = (grad_100/grad_cohort)*100)
+
+df2 <- df2 %>%
+  mutate( grad_150_rate = (grad_150/grad_cohort)*100)
+
+df2 <- df2 %>% 
+          mutate(grad_100_rate = coalesce(grad_100_rate, 0)) 
+
+df2 <- filter(df2, race != "X" & race != "W"  & state != "United States" & grad_150_rate != "NaN")
+
+# set.seed(4)
+# 
+# indices <- sample(nrow(df2),700)
+# 
+# df2 <- df2[indices, ]
+# df2_explore <- df2[-indices,]
+
+
+
+
+```
+
+
+```{r, calculating the minority percentage as a whole without race distinction, warning=FALSE, include=FALSE}
+
+# Used for internal exploratory analysis
+
+df_wrace <- filter(df_wrace, race != "X" & race != "W")
+
+df_wrace = df_wrace %>% group_by(state, control, level)  %>%
+                    summarise(grad_cohort = sum(grad_cohort),
+                              grad_100 = sum(grad_100),
+                              grad_150 = sum(grad_150),
+                              total_cohort = mean(total_cohort),
+                              .groups = 'drop')
+
+df_wrace <- merge(x=df_wrace,y=details, 
+             by=c("state","control","level"),
+             all.x=TRUE)
+
+df_wrace <- df_wrace %>%
+  mutate(perc_minority = (grad_cohort/total_cohort)*100)
+
+df_wrace <- df_wrace %>%
+  mutate( grad_100_rate = (grad_100/grad_cohort)*100)
+
+df_wrace <- df_wrace %>%
+  mutate( grad_150_rate = (grad_150/grad_cohort)*100)
+
+df_wrace <- df_wrace %>% 
+          mutate(grad_100_rate = coalesce(grad_100_rate, 0))
+
+df_wrace <- df_wrace %>% 
+          mutate(grad_100 = coalesce(grad_100, 0))
+
+df_wrace <- filter(df_wrace, state != "United States" & grad_cohort != 0 )
+
+
+df_wrace <- merge(x=df_wrace,y=party, 
+             by=c("state"),
+             all.x=TRUE)
+
+df_wrace <- merge(x=df_wrace,y=inst_details, 
+             by=c("state","control","level"),
+             all.x=TRUE)
+
+
+# set.seed(3)
+# 
+# indices <- sample(nrow(df_wrace),150)
+# 
+# df_wrace <- df_wrace[indices, ]
+# df_wrace_explore <- df_wrace[-indices,]
+
+
+```
+
+```{r, checking the data, warning=FALSE, include=FALSE}
+
+example <- filter(df, state == "California" )
+write.csv(example, "C:\\Users\\Haitham\\Desktop\\W203\\example.csv", row.names=FALSE)
+```
+
+```{r, warning=FALSE, include=FALSE}
+ 
+Figure_1 <- df2 %>%  
+ggplot( 
+    aes(y=grad_150_rate, x = perc_minority, colour = race)) + 
+    geom_point(size=0.2) +
+    geom_smooth(se=FALSE) +  
+    labs(
+      x = 'Percentage of Minority race in Cohort', 
+      y = 'Graduation rate') +
+  ggtitle("Graduation rate vs Minority percentage") +
+  theme(legend.title=element_blank(), legend.position = c(0.8, 0.84))
+
+plot_2 <- df %>%  
+ggplot( 
+    aes(y=grad_150_rate, x = perc_minority, colour = Party)) + 
+    geom_point() +
+    geom_smooth(se=FALSE) + 
+    labs(
+      x = 'Percentage of Minority race in Cohort', 
+      y = 'Graduation rate') +
+  theme(legend.title=element_blank(), legend.position = c(0.8, 0.84))
+
+plot_3 <- df %>%  
+ggplot( 
+    aes(y=grad_150_rate, x = perc_minority, colour = level)) + 
+    geom_point() +
+    geom_smooth(se=FALSE) +  
+    labs(
+      x = 'Percentage of Minority race in Cohort', 
+      y = 'Graduation rate') +
+  theme(legend.title=element_blank(), legend.position = c(0.8, 0.84))
+
+plot_2
+#plot_3
+```
+
+
+```{r, warning=FALSE, include=FALSE}
+plot_1_wrace <- df_wrace %>%  
+ggplot( 
+    aes(y=grad_150_rate, x = perc_minority)) + 
+    geom_point() +
+    geom_smooth(se=FALSE) +  
+    labs(
+      x = 'Percentage of Minority race in Cohort', 
+      y = 'Graduation rate') +
+  theme(legend.title=element_blank(), legend.position = c(0.8, 0.84))
+
+plot_1_wrace
+```
+
+
+
+```{r, adding general observations, warning=FALSE, include=FALSE}
+
+#1. how many students per race per year
+
+
+r_y_count <- data %>% group_by(race,year)  %>%
+                    summarise(grad_cohort = sum(grad_cohort),
+                              .groups = 'drop')
+
+
+
+
+
+
+plot_1 <-filter(r_y_count, race != "X")  %>%
+ggplot() + 
+    aes(y=grad_cohort, x = year, colour = race) + 
+    geom_point() +
+    geom_smooth(se=FALSE) +  
+    labs(
+      x = 'Year', 
+      y = 'total graduation count'
+      , title = "Student Graduation Count by Race/Year ") + theme(legend.title=element_blank(), legend.position = c(0.8, 0.84),
+    )
+  
+
+#1.b What is the graduation rate per year per race
+
+r_y_rate <- data %>% group_by(race,year)  %>%
+                    summarise(grad_rate_150 = sum(grad_150)/sum(grad_cohort),
+                              .groups = 'drop')
+
+
+
+
+
+
+Figure_2 <-filter(r_y_rate, race != "X")  %>%
+ggplot() + 
+    aes(y=grad_rate_150, x = year, colour = race) + 
+    geom_point() +
+    geom_smooth(se=FALSE) +  
+    labs(
+      x = 'Year', 
+      y = 'total graduation rate'
+      , title = "Student Graduation Rate by Race/Year ")+
+     theme(legend.title=element_blank(), legend.position = c(0.1, 0.5),)
+
+  
+
+
+#2 how many students per race 
+
+
+r_count <- data %>% group_by(race)  %>%
+                    summarise(grad_cohort = sum(grad_cohort),
+                              .groups = 'drop')
+
+
+
+
+#2. how many "minorities"
+
+###
+
+minor_count <- filter(data, race !="X") 
+                  
+minor_count <- within(minor_count, race_2 <- ifelse(race != "W", "minority", race)) 
+              
+minor_count_2 <- minor_count %>% group_by(race_2,year) %>%
+              summarise(grad_cohort = sum(grad_cohort),
+                              .groups = 'drop')
+
+
+
+plot_3 <- minor_count_2%>%
+  ggplot() + 
+    aes(y=grad_cohort, x = year, colour = race_2) + 
+    geom_point() +
+    geom_smooth(se=FALSE) +  
+    labs(
+      x = 'Year', 
+      y = 'Count of students'
+      , title = "Student Graduation Count Minority vs White ")+
+       theme(legend.title=element_blank(), legend.position = c(0.8, 0.84),
+      )
+
+minor_count_3 <- minor_count %>% group_by(race_2,year) %>%
+              summarise(grad_cohort = sum(grad_150)/sum(grad_cohort),
+                              .groups = 'drop')
+Figure_4 <-  minor_count_3%>%
+  ggplot() + 
+    aes(y=grad_cohort, x = year, colour = race_2) + 
+    geom_point() +
+    geom_smooth(se=FALSE) +  
+    labs(
+      x = 'Year', 
+      y = 'Grad Rate'
+      , title = "Student Graduation Rate Minority vs White ")+
+       theme(legend.title=element_blank(), legend.position = c(0.8, 0.5),
+      )
+
+                      
+                 #3. how did the percentage of minorities increase yoy?
+
+
+#Q4 how did the rate of graduation increase of minority vs white
+plot_1
+plot_2
+plot_3
+
+
+```
+
+## Initial Observations/Exploratory Analysis:
+
+In our first analysis we plotted the percentage minority against the graduation rate (Figure 1). This gave us an initial discovery that we decided to pursue. Our analysis led us to believe that there is an inverse relationship between graduation rate and minority percentage as the less minorities are within a cohort, the higher the graduation rate for those minorities are.
+
+
+```{r,echo=FALSE, message=FALSE, warnings=FALSE, include=TRUE}
+Figure_1
+```
+
+We then evaluated the graduation rate among all races (including the omitted race “white”) to gain an understanding of our data. Although Whites had by far the largest graduation numbers, Asians had the highest graduation rate (Figure 2). Given that Asians are considered a minority within our analysis, it was interesting to see that despite this, the minority graduation rate is still well below that of Whites (Figure 3).
+
+
+
+```{r, echo=FALSE,message=FALSE, warnings=FALSE, include=TRUE}
+
+grid.arrange(Figure_2 + theme(legend.position="top"), Figure_4+ theme(legend.position="top"), ncol = 2)
+
+
+```
+
+
+## Our regression Models:
+
+The goal of our regression is to try and identify and quantify the relationship between our dependent variable, graduation rate, and the main dependent variable, Minority percentage. We end up modeling the following three regressions:
+
+
+$$
+\widehat{graduation\  rate}=\beta_0 + \beta_1 \cdot (Minority\  percentage) + \mathbf{\epsilon}
+$$
+$$
+\widehat{graduation\  rate}=\beta_0 + \beta_1 \cdot (Minority\  percentage) + \beta_2 \cdot (Financial\  Aid) + \mathbf{\epsilon}
+$$
+$$
+\widehat{graduation\  rate}=\beta_0 + \beta_1 \cdot (Minority\  percentage) + \beta_2 \cdot (Financial\  Aid)+ \beta_3 \cdot (State\  Appropriation)+ \mathbf{\epsilon}
+$$
+
+```{r,  warning=FALSE, include=FALSE}
+model <- lm( grad_150_rate ~ perc_minority, data = df)
+model_1 <- lm(grad_150_rate ~ perc_minority + aid_value , data = df)
+model_2 <- lm(grad_150_rate ~ perc_minority + aid_value + state_appr_value , data = df)
+```
+
+
+
+```{r, building the model,  warning=FALSE, include=FALSE}
+ 
+model <- lm( grad_150_rate ~ perc_minority, data = df)
+
+model_1 <- lm(grad_150_rate ~ perc_minority + aid_value , data = df)
+
+model_2 <- lm(grad_150_rate ~ perc_minority + aid_value + state_appr_value , data = df)
+
+model_3 <- lm(grad_150_rate ~   aid_value, data = df)
+
+
+
+#normalized models
+model_norm_1 <- lm(grad_150_rate ~ perc_minority + aid_value_norm , data = df)
+
+model_norm_2 <- lm(grad_150_rate ~ perc_minority + aid_value_norm + state_appr_value , data = df)
+
+#Models for testing
+
+model_wrace <- lm(grad_150_rate ~ perc_minority + aid_value, data = df_wrace)
+
+model_4 <- lm(grad_150_norm ~ grad_cohort_norm , data = df)
+
+model_log <- lm(grad_150_rate ~ perc_minority + log(state_appr_value) + log(aid_value), data = df)
+
+
+
+
+
+# gathering the Std Error
+se_model <- model %>% 
+  vcovHC(type = "HC1") %>% 
+  diag() %>% 
+  sqrt()
+
+se_model_norm_1  <- model_norm_1  %>% 
+  vcovHC(type = "HC1") %>% 
+  diag() %>% 
+  sqrt()
+
+
+se_model_norm_2 <- model_norm_2 %>% 
+  vcovHC(type = "HC1") %>% 
+  diag() %>% 
+  sqrt()
+
+
+
+se_model_1  <- model_1  %>% 
+  vcovHC(type = "HC1") %>% 
+  diag() %>% 
+  sqrt()
+
+
+se_model_2 <- model_2 %>% 
+  vcovHC(type = "HC1") %>% 
+  diag() %>% 
+  sqrt()
+
+
+
+se_model_wrace <- model_wrace %>% 
+  vcovHC(type = "HC1") %>% 
+  diag() %>% 
+  sqrt()
+
+
+
+se_model_3 <- model_3 %>% 
+  vcovHC(type = "HC1") %>% 
+  diag() %>% 
+  sqrt()
+
+
+se_model_4 <- model_4 %>% 
+  vcovHC(type = "HC1") %>% 
+  diag() %>% 
+  sqrt()
+
+
+
+se_model_log <- model_log %>% 
+  vcovHC(type = "HC1") %>% 
+  diag() %>% 
+  sqrt()
+
+
+```
+
+```{r,  warning=FALSE, include=FALSE}
+
+
+# Normalized variables
+
+stargazer(
+  model, model_norm_1, model_norm_2, 
+  type = 'text', 
+  se = list(se_model,se_model_norm_2,se_model_norm_2),
+  covariate.labels = 
+        c("Percent Minority", "Normalized Student Aid", "State appropriations"),
+  header=FALSE,
+  title = "Estimated Regressions",
+  dep.var.caption  = "Output Variable: Graduation Rate",
+  dep.var.labels   = "",
+  star.cutoffs = c(0.1, 0.05, 0.01)
+  
+)
+
+
+```
+
+## Results:
+
+Starting off with the first model, or our base model, we tested the percent minority against the graduation rate. In the second model we tested the percent minority and financial aid value.The third model we tested percent minority, aid value and the state appropriate value. Despite our initial assumptions that there may have been a negative correlation between percent minority and graduation rate, our results were returned to be inconclusive.
+Per the stargazer table depicted below, the perc_minority field is not statistically significant. We thus cannot reject the null hypothesis of the percent minority composition having an impact on the graduation rate for minorities. 
+
+However, during our analysis our team did discover an interesting finding. Student Aid returned a highly significant P-value. Per the stargazer table, for every $500 increase in student aid will result in an increase of one percent in student graduation rate.
+
+
+```{r,warning=FALSE, message=FALSE, echo=FALSE,include=TRUE, results='markup'}
+stargazer(
+  model, model_1, model_2, 
+  type = 'text', 
+  se = list(se_model,se_model_2,se_model_2),
+  covariate.labels = 
+        c("Percent Minority", "Student Aid", "State appropriations"),
+  header=FALSE,
+  title = "Estimated Regressions",
+  dep.var.caption  = "Output Variable: Graduation Rate",
+  dep.var.labels   = "",
+  star.cutoffs = c(0.1, 0.05, 0.01)
+  
+)
+```
+There are limitations to our analysis though. For regression estimates to be reliable, it is necessary to assume that the observations are independent and identically distributed (iid). There are some factors that we see might create dependencies between different samples. First of all, based on figure (1) we can safely say that the distribution of graduation rate varies significantly between races as we see clusters. Secondly, our dataset considers only 5 racial minorities. This can be problematic because it does not account for the diversity within each of these categories. Moreover, racial categories are social constructs and can vary across different cultures and societies. Therefore, a limited number of categories may not accurately capture the diversity of racial identities and experiences.Additionally, some people may not feel that any of the available categories accurately represent their racial identity. This can lead to people feeling forced to choose a category that they do not fully identify with or feeling excluded from the survey altogether. For example, Middle eastern or North African Americans don't perceive themselves as white (4).
+Despite our hopes of discovering conclusive results, our team decided to be careful to not fall into the trap of “fishing for results” and we opted to publish our findings. 
+
+## Conclusion:
+
+The Galactic Mavericks team sought to answer the following research question : Does having a higher percentage of racial minority composition within a student body lead to higher graduation rates for minorities? Despite initial optimism from our exploratory analysis, our results came back as inconclusive. As such we cannot determine if having a higher percentage of minority students will lead to higher graduation rates for those students.
+Despite this, this cannot be viewed as a complete failure. Our team did an honest investigation and did not attempt to search for results by modifying our analysis to find significant results. 
+However if time was not a constraint, our team would have done additional research and analysis to evaluate the effect on graduation rates for minorities. Currently we're implicitly looking at graduation rate from the lens of race. In reality there are multiple causal factors at play in determining one's likelihood of graduation. In order to capture all those factors, we would have to look at this problem from various angles simultaneously.  For instance, during our analysis, our team discovered that there is a strong correlation between the amount of student financial aid received and graduation rates. If we had more time for our research, our team would have been interested in investigating several other factors, such as the impact of sexual orientation, socioeconomics, and epigenetics to name a few.
+
+## Citations:
+
+1. Hanson, Melanie. “College Enrollment & Student Demographic Statistics” EducationData.org, July 26, 2022,
+https://educationdata.org/college-enrollment-statistics
+
+2. “College Completion and Efficiency Measures for US.” Kaggle,     https://www.kaggle.com/datasets/thedevastator/college-completion-and-efficiency-measures-for-u. 
+
+3. "About the Topic of Race" United States Census Bureau, 
+https://www.census.gov/topics/population/race/about.html
+
+4. "Middle Eastern and North African Americans may not be perceived, nor perceive themselves, to be White" PNAS,
+https://www.pnas.org/doi/10.1073/pnas.2117940119
+
+
+
+```{r,  warning=FALSE, include=FALSE}
+
+stargazer(
+  model_3, type = 'text',
+  se = se_model_3)
+
+```
+
+```{r,  warning=FALSE, include=FALSE}
+
+stargazer(
+  model_4, type = 'text',
+  se = se_model_4)
+
+```
+
+```{r,  warning=FALSE, include=FALSE}
+stargazer(
+  model_wrace, type = 'text',
+  se = se_model_wrace)
+```
+
+```{r,  warning=FALSE, include=FALSE}
+stargazer(
+  model_log, type = 'text',
+  se = se_model_log)
+```
+
+
+
+```{r,  warning=FALSE, include=FALSE}
+
+#analyzing the CLM assumptions
+qqnorm(resid(model))
+#plot(fitted(model),df$grad_150_rate)
+qqnorm(resid(model_1))
+qqnorm(resid(model_2))
+```
+
